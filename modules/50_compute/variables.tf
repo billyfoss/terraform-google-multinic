@@ -32,11 +32,6 @@ variable "zone" {
   type        = string
 }
 
-variable "service_account_email" {
-  description = "The service account bound to the bridge VM instances.  Must have permission to create Route resources in both the app and core VPC networks."
-  type        = string
-}
-
 variable "os_image" {
   description = "The os_image used with the MIG instance template"
   type        = string
@@ -76,11 +71,6 @@ variable "nic1_subnet" {
 
 variable "nic1_project" {
   description = "The project id which hosts the shared vpc network."
-  type        = string
-}
-
-variable "hc_self_link" {
-  description = "The health check self link used for auto healing.  This health check may be reused with backend services."
   type        = string
 }
 

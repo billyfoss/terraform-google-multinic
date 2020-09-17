@@ -28,6 +28,21 @@ data "template_file" "startup-script-config" {
   }
 }
 
+// Google Service Account to attach to multinic VM instances.
+resource "google_service_account" "multinic" {
+  project      = var.project_id
+  account_id   = "${var.name_prefix}-sa"
+  display_name = "multinic vm router"
+  description  = "Multinic VM Router"
+}
+
+// Allow multinic instances to write log entries
+resource "google_project_iam_member" "log_writer" {
+  project = var.project_id
+  member  = "serviceAccount:${google_service_account.multinic.email}"
+  role    = "roles/logging.logWriter"
+}
+
 resource google_compute_instance_template "multinic" {
   project        = var.project_id
   name_prefix    = var.name_prefix
@@ -74,8 +89,27 @@ resource google_compute_instance_template "multinic" {
   }
 
   service_account {
-    email  = var.service_account_email
+    email  = google_service_account.multinic.email
     scopes = ["cloud-platform"]
+  }
+}
+
+
+# The "health" health check is used for auto-healing with the MIG.  The
+# timeouts are longer to reduce the risk of removing an otherwise healthy
+# instance.
+resource google_compute_health_check "multinic-health" {
+  project = var.project_id
+  name    = "${var.name_prefix}-${var.zone}-hc"
+
+  check_interval_sec  = 10
+  timeout_sec         = 5
+  healthy_threshold   = 2
+  unhealthy_threshold = 3
+
+  http_health_check {
+    port         = 9000
+    request_path = "/status.json"
   }
 }
 
@@ -108,7 +142,7 @@ resource "google_compute_instance_group_manager" "multinic" {
   }
 
   auto_healing_policies {
-    health_check      = var.hc_self_link
+    health_check      = google_compute_health_check.multinic-health.self_link
     initial_delay_sec = var.hc_initial_delay_secs
   }
 

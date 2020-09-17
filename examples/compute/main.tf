@@ -28,16 +28,18 @@ variable "num_instances_b" {
 locals {
   project_id = "multinic-networks-18d1"
   region     = "us-west1"
+  zone_a     = "us-west1-a"
+  zone_b     = "us-west1-b"
 
-  # nic0's gateway routes to this netblock
-  nic0_netblock = "10.32.0.0/14"
-  # nic1's gateway routes to this netblock
-  nic1_netblock = "10.36.0.0/14"
+  # shared vpc netblock
+  shared_vpc_netblock = "10.32.0.0/14"
+  # transit vpc netblock
+  transit_netblock = "10.36.0.0/14"
 
-  nic0_network = "main"
-  nic0_subnet  = "main-bridge"
-  nic1_network = "transit"
-  nic1_subnet  = "transit-bridge"
+  shared_vpc_network = "main"
+  shared_vpc_subnet  = "main-bridge"
+  transit_network = "transit"
+  transit_subnet  = "transit-bridge"
 }
 
 # Manage the regional MIG formation
@@ -49,20 +51,17 @@ module "multinic-a" {
   project_id  = local.project_id
   name_prefix = "multinic-a"
   region      = local.region
-  zone        = "${local.region}-a"
+  zone        = local.zone_a
 
-  nic0_network = local.nic0_network
+  nic0_network = local.shared_vpc_network
   nic0_project = local.project_id
-  nic0_subnet  = local.nic0_subnet
-  nic0_cidrs   = [local.nic0_netblock]
+  nic0_subnet  = local.shared_vpc_subnet
+  nic0_cidrs   = [local.shared_vpc_netblock]
 
-  nic1_network = local.nic1_network
+  nic1_network = local.transit_network
   nic1_project = local.project_id
-  nic1_subnet  = local.nic1_subnet
-  nic1_cidrs   = [local.nic1_netblock]
-
-  hc_self_link = google_compute_health_check.multinic-health.self_link
-  service_account_email = "multinic@${local.project_id}.iam.gserviceaccount.com"
+  nic1_subnet  = local.transit_subnet
+  nic1_cidrs   = [local.transit_netblock]
 }
 
 module "multinic-b" {
@@ -73,39 +72,17 @@ module "multinic-b" {
   project_id  = local.project_id
   name_prefix = "multinic-b"
   region      = local.region
-  zone        = "${local.region}-b"
+  zone        = local.zone_b
 
-  nic0_network = local.nic0_network
+  nic0_network = local.shared_vpc_network
   nic0_project = local.project_id
-  nic0_subnet  = local.nic0_subnet
-  nic0_cidrs   = [local.nic0_netblock]
+  nic0_subnet  = local.shared_vpc_subnet
+  nic0_cidrs   = [local.shared_vpc_netblock]
 
-  nic1_network = local.nic1_network
+  nic1_network = local.transit_network
   nic1_project = local.project_id
-  nic1_subnet  = local.nic1_subnet
-  nic1_cidrs   = [local.nic1_netblock]
-
-  # Note this is the auto-healing check, not the traffic check
-  hc_self_link = google_compute_health_check.multinic-health.self_link
-  service_account_email = "multinic@${local.project_id}.iam.gserviceaccount.com"
-}
-
-# The "health" health check is used for auto-healing with the MIG.  The
-# timeouts are longer to reduce the risk of removing an otherwise healthy
-# instance.
-resource google_compute_health_check "multinic-health" {
-  project = local.project_id
-  name    = "multinic-health"
-
-  check_interval_sec  = 10
-  timeout_sec         = 5
-  healthy_threshold   = 2
-  unhealthy_threshold = 3
-
-  http_health_check {
-    port         = 9000
-    request_path = "/status.json"
-  }
+  nic1_subnet  = local.transit_subnet
+  nic1_cidrs   = [local.transit_netblock]
 }
 
 # The "traffic" health check is used by the load balancer.  The instance will
@@ -133,7 +110,7 @@ resource "google_compute_region_backend_service" "multinic-main" {
   project  = local.project_id
 
   name                  = "multinic-main"
-  network               = "main"
+  network               = local.shared_vpc_network
   region                = local.region
   load_balancing_scheme = "INTERNAL"
 
@@ -154,7 +131,7 @@ resource "google_compute_region_backend_service" "multinic-transit" {
   project  = local.project_id
 
   name                  = "multinic-transit"
-  network               = "transit"
+  network               = local.transit_network
   region                = local.region
   load_balancing_scheme = "INTERNAL"
 
@@ -175,7 +152,7 @@ resource "google_compute_address" "main" {
   name         = "main-fwd"
   project      = local.project_id
   region       = local.region
-  subnetwork   = "main-bridge"
+  subnetwork   = local.shared_vpc_subnet
   address_type = "INTERNAL"
 }
 
@@ -183,7 +160,7 @@ resource "google_compute_address" "transit" {
   name         = "transit-fwd"
   project      = local.project_id
   region       = local.region
-  subnetwork   = "transit-bridge"
+  subnetwork   = local.transit_subnet
   address_type = "INTERNAL"
 }
 
@@ -194,8 +171,8 @@ resource google_compute_forwarding_rule "main" {
 
   ip_address      = google_compute_address.main.address
   backend_service = google_compute_region_backend_service.multinic-main.id
-  network         = "main"
-  subnetwork      = "main-bridge"
+  network         = local.shared_vpc_network
+  subnetwork      = local.shared_vpc_subnet
 
   load_balancing_scheme = "INTERNAL"
   all_ports             = true
@@ -209,8 +186,8 @@ resource google_compute_forwarding_rule "transit" {
 
   ip_address      = google_compute_address.transit.address
   backend_service = google_compute_region_backend_service.multinic-transit.id
-  network         = "transit"
-  subnetwork      = "transit-bridge"
+  network         = local.transit_network
+  subnetwork      = local.transit_subnet
 
   load_balancing_scheme = "INTERNAL"
   all_ports             = true
@@ -221,8 +198,8 @@ resource google_compute_forwarding_rule "transit" {
 resource google_compute_route "main" {
   name         = "main"
   project      = local.project_id
-  network      = local.nic0_network
-  dest_range   = local.nic1_netblock
+  network      = local.shared_vpc_network
+  dest_range   = local.transit_netblock
   priority     = 900
   next_hop_ilb = google_compute_forwarding_rule.main.self_link
 }
@@ -230,8 +207,8 @@ resource google_compute_route "main" {
 resource google_compute_route "transit" {
   name         = "transit"
   project      = local.project_id
-  network      = local.nic1_network
-  dest_range   = local.nic0_netblock
+  network      = local.transit_network
+  dest_range   = local.shared_vpc_netblock
   priority     = 900
   next_hop_ilb = google_compute_forwarding_rule.transit.self_link
 }

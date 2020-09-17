@@ -24,6 +24,20 @@ data "template_file" "startup-script-config" {
   template = "${file("${path.module}/templates/startup-script-config.tpl")}"
 }
 
+// Google Service Account to attach to endpoint VM instances.
+resource "google_service_account" "endpoint" {
+  project      = var.project_id
+  account_id   = "endpoint"
+  display_name = "endpoint"
+  description  = "Endpoint used for Multinic Testing"
+}
+
+resource "google_project_iam_member" "log_writer_endpoint" {
+  project = var.project_id
+  member  = "serviceAccount:${google_service_account.endpoint.email}"
+  role    = "roles/logging.logWriter"
+}
+
 resource google_compute_instance_template "template" {
   project        = var.project_id
   name_prefix    = var.name_prefix
@@ -63,7 +77,7 @@ resource google_compute_instance_template "template" {
   }
 
   service_account {
-    email  = var.service_account_email
+    email  = google_service_account.endpoint.email
     scopes = ["cloud-platform"]
   }
 }

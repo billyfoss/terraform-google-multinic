@@ -62,32 +62,3 @@ module "transit-vpc" {
   project_id   = local.project_id
   region       = local.region
 }
-
-// Google Service Account to attach to multinic VM instances.
-resource "google_service_account" "multinic" {
-  project      = local.project_id
-  account_id   = "multinic"
-  display_name = "multinic vm router"
-  description  = "Multinic VM Router"
-}
-
-// Google Service Account to attach to endpoint VM instances.
-resource "google_service_account" "endpoint" {
-  project      = local.project_id
-  account_id   = "endpoint"
-  display_name = "endpoint"
-  description  = "Endpoint used for Multinic Testing"
-}
-
-// Allow multinic instances to write log entries
-resource "google_project_iam_member" "log_writer" {
-  project = local.project_id
-  member  = "serviceAccount:${google_service_account.multinic.email}"
-  role    = "roles/logging.logWriter"
-}
-
-resource "google_project_iam_member" "log_writer_endpoint" {
-  project = local.project_id
-  member  = "serviceAccount:${google_service_account.endpoint.email}"
-  role    = "roles/logging.logWriter"
-}
